@@ -30,7 +30,7 @@ const CartDrawer = ({
         .from("restaurants")
         .select("gst_enabled, gst_rate")
         .eq("id", restaurantId)
-        .single();
+        .maybeSingle();
 
       if (data) {
         setGstEnabled(data.gst_enabled ?? false);
@@ -64,7 +64,9 @@ const CartDrawer = ({
           total: subtotal,
           tax_percentage: gstEnabled ? gstPercentage : 0,
         })
-        .select().single();
+        .select().maybeSingle();
+        console.log("restaurantId:", restaurantId);
+console.log("tableId:", tableId);
 
       if (orderError) throw orderError;
 
