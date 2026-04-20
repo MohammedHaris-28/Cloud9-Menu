@@ -9,13 +9,14 @@ import CartDrawer from "@/components/menu/CartDrawer";
 import FloatingActions from "@/components/menu/FloatingActions";
 import ReviewModal from "@/components/menu/ReviewModal";
 import { useCart } from "@/hooks/useCart";
-import { Loader2, ShoppingBag } from "lucide-react";
+import { Loader2, ShoppingBag, ChevronRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { MenuItem, MenuCombo, Category } from "@/data/menuData";
 
 const Index = () => {
   const { tableId } = useParams();
+  const cart = useCart();
 
   // Data State
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -33,73 +34,33 @@ const Index = () => {
   const [cartOpen, setCartOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  const cart = useCart();
-
-  // 🔥 LOAD EVERYTHING
   useEffect(() => {
     const loadData = async () => {
-      if (!tableId) {
-        setInvalidTable(true);
-        return;
-      }
-
+      if (!tableId) { setInvalidTable(true); return; }
       setLoading(true);
-
       try {
-        // 1. Validate Table & Get Restaurant ID
         const { data: tableData, error: tableError } = await supabase
-          .from("tables")
-          .select("*")
-          .eq("id", tableId)
-          .single();
+          .from("tables").select("*").eq("id", tableId).single();
 
-        if (tableError || !tableData) {
-          setInvalidTable(true);
-          return;
-        }
-
+        if (tableError || !tableData) { setInvalidTable(true); return; }
         setTable(tableData);
         const restaurantId = tableData.restaurant_id;
 
-        // 2. Parallel Fetch: Categories, Restaurant, and Combos with Junction Join
         const [menuRes, restRes, comboRes] = await Promise.all([
-          supabase
-            .from("menu_categories")
-            .select(`*, menu_items(*)`)
-            .eq("restaurant_id", restaurantId),
-          
-          supabase
-            .from("restaurants")
-            .select("*")
-            .eq("id", restaurantId)
-            .single(),
-
-          supabase
-            .from("menu_combos")
-            .select(`
-              *,
-              menu_combo_items (
-                quantity,
-                menu_items ( name )
-              )
-            `)
-            .eq("restaurant_id", restaurantId)
-            .eq("is_available", true)
+          supabase.from("menu_categories").select(`*, menu_items(*)`).eq("restaurant_id", restaurantId),
+          supabase.from("restaurants").select("*").eq("id", restaurantId).single(),
+          supabase.from("menu_combos").select(`*, menu_combo_items (quantity, menu_items (name))`)
+            .eq("restaurant_id", restaurantId).eq("is_available", true)
         ]);
 
         if (menuRes.error) throw menuRes.error;
-        if (comboRes.error) throw comboRes.error;
 
-        // 3. Process Menu Items
         const allItems = menuRes.data?.flatMap((cat: any) =>
           (cat.menu_items || []).map((item: any) => ({
-            ...item,
-            category_id: cat.id,
-            category_name: cat.name,
+            ...item, category_id: cat.id, category_name: cat.name,
           }))
         ) || [];
 
-        // 4. Process Combos (Mapping nested junction items to simple included_items array)
         const allCombos = (comboRes.data || []).map((c: any) => ({
           ...c,
           included_items: (c.menu_combo_items || []).map((j: any) => ({
@@ -112,65 +73,50 @@ const Index = () => {
         setMenuItems(allItems);
         setCombos(allCombos);
         setRestaurant(restRes.data);
-
       } catch (err: any) {
-        console.error("Fetch Error:", err);
-        toast.error(err.message || "Failed to load menu");
+        toast.error("Failed to load menu");
       } finally {
         setLoading(false);
       }
     };
-
     loadData();
   }, [tableId]);
 
-  // 🔥 FILTERING LOGIC (Updated to isolate Combos)
+  // Find the display name for the active category to avoid showing UUID
+  const activeCategoryName = useMemo(() => {
+    if (activeCategory === "All") return "All Items";
+    if (activeCategory === "Combos") return "Featured Bundles";
+    const found = categories.find(c => c.id === activeCategory);
+    return found ? `${found.name} Items` : "Menu Items";
+  }, [activeCategory, categories]);
+
   const displayContent = useMemo(() => {
     const query = searchQuery.toLowerCase();
+    const isCombosTab = activeCategory === "Combos";
 
-    // Filter Items: Show in All or specific categories, NEVER show if "Combos" tab is active
-    const filteredItems = menuItems.filter((item) => {
+    const filteredItems = isCombosTab ? [] : menuItems.filter((item) => {
       const matchesCategory = activeCategory === "All" || item.category_id === activeCategory;
-      const matchesSearch = item.name.toLowerCase().includes(query);
-      return matchesCategory && matchesSearch && activeCategory !== "Combos" && item.is_available;
+      return matchesCategory && item.name.toLowerCase().includes(query) && item.is_available;
     });
 
-    // Filter Combos: ONLY show if "Combos" tab is active
-    const filteredCombos = combos.filter((combo) => {
-      const matchesSearch = combo.name.toLowerCase().includes(query);
-      const isCombosTab = activeCategory === "Combos";
-      return isCombosTab && matchesSearch && combo.is_available;
-    });
+    const filteredCombos = !isCombosTab ? [] : combos.filter((combo) => 
+      combo.name.toLowerCase().includes(query) && combo.is_available
+    );
 
     return { filteredItems, filteredCombos };
   }, [activeCategory, searchQuery, menuItems, combos]);
 
-  // ERROR & LOADING STATES
-  if (invalidTable) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
-          <Loader2 className="w-8 h-8 rotate-45" />
-        </div>
-        <h2 className="text-xl font-bold text-zinc-900">Invalid QR Code</h2>
-        <p className="text-zinc-500 mt-2">This table does not exist or the link is broken.</p>
-      </div>
-    );
-  }
+  if (invalidTable) return <div className="h-screen flex items-center justify-center font-bold">Invalid Table QR</div>;
 
-  if (loading) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4 bg-white">
-        <Loader2 className="w-12 h-12 animate-spin text-emerald-800" />
-        <p className="text-zinc-400 font-medium animate-pulse tracking-widest uppercase text-xs">
-          Setting up your menu
-        </p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-white">
+      <Loader2 className="w-10 h-10 animate-spin text-zinc-900" />
+      <p className="mt-4 text-zinc-400 font-bold tracking-tighter uppercase text-xs">Loading Menu...</p>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-[#fafafa] dark:bg-zinc-950 pb-32">
+    <div className="min-h-screen bg-white dark:bg-zinc-950 pb-44">
       <MenuHeader
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -180,76 +126,87 @@ const Index = () => {
         table={table}
       />
 
-      <main className="container max-w-6xl mx-auto px-4">
-        <div className="sticky top-[72px] z-30 -mx-4 px-4 bg-[#fafafa]/80 dark:bg-zinc-950/80 backdrop-blur-lg">
-          <CategoryTabs
-            active={activeCategory}
-            onChange={setActiveCategory}
-            categories={categories}
-          />
+      {/* Category Tabs: Sticky with zero gap from header */}
+      <div className="sticky top-[64px] z-30 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-b border-zinc-100">
+        <CategoryTabs
+          active={activeCategory}
+          onChange={setActiveCategory}
+          categories={categories}
+        />
+      </div>
+
+      <main className="container max-w-5xl mx-auto px-4 pt-6">
+        {/* Dynamic Labeling using Category Name instead of ID */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-zinc-900" />
+            <span className="text-[11px] font-black text-zinc-400 uppercase tracking-[0.2em]">
+              {activeCategoryName}
+            </span>
+          </div>
+          {activeCategory !== "Combos" && <ViewToggle view={view} onChange={setView} />}
         </div>
 
-        <div className="flex justify-end items-center mt-6 mb-2">
-           <span className="mr-auto text-xs font-bold text-zinc-400 uppercase tracking-widest">
-            {activeCategory === "Combos" ? "Exclusive Bundles" : "Our Menu"}
-           </span>
-          <ViewToggle view={view} onChange={setView} />
+        <div className="w-full">
+          {activeCategory === "Combos" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {displayContent.filteredCombos.map((combo) => (
+                <ComboCard
+                  key={combo.id}
+                  item={combo as any}
+                  onAdd={(item: any) => cart.addItem({ ...item, price: item.discount_price, is_veg: false })}
+                  view="grid"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={view === "grid" 
+              ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4" 
+              : "flex flex-col gap-4"
+            }>
+              {displayContent.filteredItems.map((item) => (
+                <MenuCard key={item.id} item={item} onAdd={cart.addItem} view={view} />
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className={view === "grid" ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4" : "flex flex-col gap-4 mt-4"}>
-          {/* 1. RENDER COMBOS (Only visible in Combos tab now) */}
-          {displayContent.filteredCombos.map((combo) => (
-            <ComboCard
-              key={combo.id}
-              item={combo as any}
-              onAdd={(item: any) => cart.addItem({
-                ...item,
-                price: item.discount_price,
-                is_veg: false
-              })}
-              view={view}
-            />
-          ))}
-
-          {/* 2. RENDER STANDARD ITEMS */}
-          {displayContent.filteredItems.map((item) => (
-            <MenuCard
-              key={item.id}
-              item={item}
-              onAdd={cart.addItem}
-              view={view}
-            />
-          ))}
-        </div>
-
-        {displayContent.filteredItems.length === 0 && 
-         displayContent.filteredCombos.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-32 text-center">
-            <ShoppingBag className="w-8 h-8 text-zinc-300 mb-4" />
-            <h3 className="text-zinc-900 font-bold">No items found</h3>
+        {displayContent.filteredItems.length === 0 && displayContent.filteredCombos.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-zinc-300">
+            <ShoppingBag className="w-12 h-12 mb-2 opacity-20" />
+            <p className="text-sm font-medium">No items found</p>
           </div>
         )}
       </main>
 
-      {cart.totalItems > 0 && !cartOpen && (
-        <div className="fixed bottom-8 left-0 right-0 px-4 z-40 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* --- FOOTER UI (FAB + CART) --- */}
+      <div className="fixed bottom-6 left-0 right-0 px-4 z-40 flex flex-col items-center gap-4 pointer-events-none">
+        
+        {/* Floating Actions: Positioned naturally above the cart */}
+        <div className="pointer-events-auto shadow-2xl rounded-full">
+           <FloatingActions restaurantId={restaurant?.id} />
+        </div>
+
+        {/* Checkout Bar: Adaptive Mobile Bottom Bar */}
+        {cart.totalItems > 0 && !cartOpen && (
           <button
             onClick={() => setCartOpen(true)}
-            className="w-full max-w-md mx-auto flex justify-between items-center py-4 px-6 rounded-2xl bg-[#1a4d3e] text-white shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all"
+            className="pointer-events-auto w-full max-w-md flex justify-between items-center bg-zinc-900 p-2 pl-6 rounded-2xl text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-in slide-in-from-bottom-10 duration-500"
           >
-            <div className="flex items-center gap-3">
-              <ShoppingBag className="w-5 h-5" />
-              <div className="flex flex-col items-start">
-                <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">Your Order</span>
-                <span className="font-bold">{cart.totalItems} Items</span>
-              </div>
+            <div className="flex flex-col items-start leading-none">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 mb-1">Your Order</span>
+              <span className="text-lg font-bold">₹{cart.totalPrice.toFixed(2)}</span>
             </div>
-            <span className="text-xl font-black">₹{cart.totalPrice}</span>
+            
+            <div className="flex items-center gap-2 bg-white/10 py-3 px-5 rounded-xl font-bold text-sm">
+              <span>{cart.totalItems} Items</span>
+              <ChevronRight className="w-4 h-4 opacity-50" />
+            </div>
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      <FloatingActions onReviewClick={() => setReviewOpen(true)} />
+      {/* MODALS & DRAWERS */}
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}

@@ -1,9 +1,8 @@
-import { X, Plus, Minus, ShoppingBag, Loader2, ReceiptText, ChevronRight, Package } from "lucide-react";
+import { X, Plus, Minus, ShoppingBag, Loader2, ReceiptText, Trash2 } from "lucide-react";
 import type { CartItem } from "@/hooks/useCart";
-import { getMenuImageUrl } from "@/data/menuData";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface CartDrawerProps {
   open: boolean;
@@ -18,24 +17,32 @@ interface CartDrawerProps {
 }
 
 const CartDrawer = ({ 
-  open, 
-  onClose, 
-  items, 
-  totalPrice, 
-  onAdd, 
-  onRemove, 
-  onClear,
-  restaurantId,
-  tableId 
+  open, onClose, items, totalPrice, onAdd, onRemove, onClear, restaurantId, tableId 
 }: CartDrawerProps) => {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const [gstEnabled, setGstEnabled] = useState(false);
+  const [gstPercentage, setGstPercentage] = useState(0);
 
-  // Bill Calculations
-  const taxPercentage = 5; 
+  useEffect(() => {
+    const fetchGST = async () => {
+      if (!restaurantId) return;
+      const { data } = await supabase
+        .from("restaurants")
+        .select("gst_enabled, gst_rate")
+        .eq("id", restaurantId)
+        .single();
+
+      if (data) {
+        setGstEnabled(data.gst_enabled ?? false);
+        setGstPercentage(data.gst_rate ?? 0);
+      }
+    };
+    fetchGST();
+  }, [restaurantId]);
+
   const subtotal = totalPrice;
-  const taxAmount = (subtotal * taxPercentage) / 100;
-  const totalAmount = subtotal + taxAmount;
-
+  const gstAmount = gstEnabled ? (subtotal * gstPercentage) / 100 : 0;
+  
   if (!open) return null;
 
   const handlePlaceOrder = async () => {
@@ -43,15 +50,8 @@ const CartDrawer = ({
       toast.error("Session expired. Please scan QR again.");
       return;
     }
-
-    if (items.length === 0) return;
-
     setIsPlacingOrder(true);
-
     try {
-      const orderTimestamp = new Date().toISOString();
-
-      // 1. Insert Parent Order
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
@@ -59,45 +59,31 @@ const CartDrawer = ({
           table_id: tableId,
           status: "pending",
           subtotal: subtotal,
-          cgst: 0, 
-          sgst: 0, 
-          total: subtotal, 
-          tax_percentage: taxPercentage,
-          created_at: orderTimestamp,
+          cgst: 0,
+          sgst: 0,
+          total: subtotal,
+          tax_percentage: gstEnabled ? gstPercentage : 0,
         })
-        .select()
-        .single();
+        .select().single();
 
       if (orderError) throw orderError;
 
-      // 2. Prepare Order Items (Handling both standard items and combos)
       const orderItems = items.map((item) => ({
         order_id: order.id,
-        // If it's a combo, we might store it in a different column or use a metadata field
-        // depending on your schema. Standard approach:
         menu_item_id: (item as any).included_items ? null : item.id,
         combo_id: (item as any).included_items ? item.id : null,
         quantity: item.quantity,
         price: item.price,
       }));
 
-      // 3. Insert Order Items
-      const { error: itemsError } = await supabase
-        .from("order_items")
-        .insert(orderItems);
-
-      if (itemsError) {
-        await supabase.from("orders").delete().eq("id", order.id);
-        throw itemsError;
-      }
+      const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
+      if (itemsError) throw itemsError;
 
       toast.success("Order sent to kitchen! 👨‍🍳");
       onClear();
       onClose();
-
     } catch (error: any) {
-      console.error("Order process error:", error);
-      toast.error("Order failed: " + (error.message || "Something went wrong"));
+      toast.error("Order failed: " + (error.message || "Error"));
     } finally {
       setIsPlacingOrder(false);
     }
@@ -105,144 +91,105 @@ const CartDrawer = ({
 
   return (
     <>
+      {/* Backdrop */}
       <div 
-        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity" 
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity" 
         onClick={onClose} 
       />
 
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-[2.5rem] shadow-2xl animate-in slide-in-from-bottom duration-300 max-h-[95vh] flex flex-col border-t border-zinc-100">
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-50 rounded-t-[2rem] shadow-2xl max-h-[90vh] flex flex-col transition-transform duration-300 ease-out">
         
-        <div className="flex justify-center pt-4 pb-1">
-          <div className="w-10 h-1 rounded-full bg-zinc-200" />
-        </div>
+        {/* Handle Bar */}
+        <div className="w-12 h-1.5 bg-zinc-300 rounded-full mx-auto mt-3 mb-1" />
 
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-50">
+        {/* HEADER */}
+        <div className="flex items-center justify-between px-6 py-4">
           <div>
-            <h2 className="font-extrabold text-2xl text-zinc-900 flex items-center gap-2">
-              My Cart <span className="text-sm font-medium bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">{items.length}</span>
-            </h2>
-            <p className="text-xs text-zinc-400 font-medium mt-0.5 uppercase tracking-widest">
-              Table Order
-            </p>
+            <h2 className="font-bold text-2xl text-zinc-900">Your Order</h2>
+            <p className="text-sm text-zinc-500">{items.length} items selected</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full bg-zinc-100 text-zinc-500">
+          <button 
+            onClick={onClose}
+            className="p-2 bg-zinc-200 rounded-full hover:bg-zinc-300 transition-colors"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 scrollbar-hide">
+        {/* ITEMS LIST */}
+        <div className="flex-1 overflow-y-auto px-6 space-y-4 py-2">
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20">
-              <ShoppingBag className="w-12 h-12 text-zinc-200 mb-2" />
-              <p className="text-zinc-400 font-medium">Your cart is empty</p>
+            <div className="flex flex-col items-center justify-center py-12 text-zinc-400">
+              <ShoppingBag className="w-16 h-16 mb-4 opacity-20" />
+              <p>Your cart is empty</p>
             </div>
           ) : (
-            <>
-              <div className="space-y-6">
-                {items.map((item) => {
-                  const isCombo = !!(item as any).included_items;
-                  
-                  return (
-                    <div key={item.id} className="flex items-start gap-4">
-                      {/* Image with Combo Badge */}
-                      <div className="relative flex-shrink-0">
-                        <img
-                          src={getMenuImageUrl(item.image_url || (item as any).image)}
-                          alt={item.name}
-                          className="w-20 h-20 rounded-2xl object-cover border border-zinc-100"
-                        />
-                        {isCombo && (
-                          <div className="absolute -top-2 -right-2 bg-orange-500 text-white p-1 rounded-lg shadow-lg">
-                            <Package className="w-3 h-3" />
-                          </div>
-                        )}
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-bold text-zinc-800 flex items-center gap-2">
-                          {item.name}
-                        </h4>
-                        
-                        {/* If Combo, show small list of contents */}
-                        {isCombo && (
-                          <p className="text-[10px] text-zinc-400 font-medium mt-1 line-clamp-1">
-                            {(item as any).included_items.map((i: any) => i.name).join(" + ")}
-                          </p>
-                        )}
-
-                        <p className="text-sm font-extrabold text-zinc-900 mt-1 italic">
-                          ₹{item.price.toFixed(2)}
-                        </p>
-                        
-                        <div className="flex items-center gap-3 mt-3 bg-zinc-50 w-fit px-3 py-1.5 rounded-xl border border-zinc-100">
-                          <button onClick={() => onRemove(item.id)} className="text-zinc-400 hover:text-orange-600">
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="text-sm font-bold min-w-[14px] text-center">{item.quantity}</span>
-                          <button onClick={() => onAdd(item)} className="text-zinc-400 hover:text-orange-600">
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      
-                      <div className="text-right">
-                        <p className="text-sm font-black text-zinc-900">
-                          ₹{(item.price * item.quantity).toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="bg-zinc-50 rounded-[2rem] p-5 border border-zinc-100">
-                <div className="flex items-center gap-2 mb-4 text-zinc-800">
-                  <ReceiptText className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm font-bold">Bill Summary</span>
+            items.map((item) => (
+              <div key={item.id} className="bg-white p-4 rounded-2xl flex items-center gap-4 shadow-sm border border-zinc-100">
+                <div className="flex-1">
+                  <h3 className="font-bold text-zinc-800">{item.name}</h3>
+                  {/* Combo details */}
+                  {(item as any).included_items && (
+                    <p className="text-[10px] uppercase tracking-wider text-orange-600 font-medium mt-0.5">
+                      {(item as any).included_items.map((i: any) => i.name).join(" • ")}
+                    </p>
+                  )}
+                  <p className="text-zinc-500 font-medium mt-1">₹{item.price.toFixed(2)}</p>
                 </div>
-                
-                <div className="space-y-3">
-                  <div className="flex justify-between text-sm text-zinc-500">
-                    <span>Item Total</span>
-                    <span>₹{subtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm text-zinc-500">
-                    <span>Taxes ({taxPercentage}%)</span>
-                    <span>₹{taxAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="pt-3 border-t border-dashed border-zinc-200 flex justify-between items-center">
-                    <span className="font-bold text-zinc-900">Grand Total</span>
-                    <span className="font-black text-xl text-orange-600">₹{totalAmount.toFixed(2)}</span>
-                  </div>
+
+                <div className="flex items-center bg-zinc-100 rounded-xl p-1 gap-3">
+                  <button
+                    onClick={() => onRemove(item.id)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-white shadow-sm active:scale-95 transition-transform"
+                  >
+                    <Minus className="w-4 h-4 text-zinc-600" />
+                  </button>
+                  <span className="font-bold text-zinc-800 w-4 text-center">{item.quantity}</span>
+                  <button
+                    onClick={() => onAdd(item)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-zinc-900 shadow-sm active:scale-95 transition-transform"
+                  >
+                    <Plus className="w-4 h-4 text-white" />
+                  </button>
                 </div>
               </div>
-            </>
+            ))
           )}
         </div>
 
+        {/* BILLING SUMMARY */}
         {items.length > 0 && (
-          <div className="p-6 bg-white border-t border-zinc-100 pb-10">
+          <div className="bg-white border-t border-zinc-100 px-6 pt-6 pb-8 rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0,04)]">
+            <div className="space-y-3 mb-6">
+              <div className="flex justify-between text-zinc-500 text-sm">
+                <span>Subtotal</span>
+                <span>₹{subtotal.toFixed(2)}</span>
+              </div>
+              {gstEnabled && (
+                <div className="flex justify-between text-zinc-400 text-xs italic">
+                  <span>GST ({gstPercentage}%) included in price</span>
+                  <span>₹{gstAmount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="h-px bg-dashed bg-zinc-200 w-full border-t border-dashed my-2" />
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-lg text-zinc-900">Total Amount</span>
+                <span className="font-black text-2xl text-zinc-900">₹{subtotal.toFixed(2)}</span>
+              </div>
+            </div>
+
             <button
               onClick={handlePlaceOrder}
               disabled={isPlacingOrder}
-              className="w-full bg-zinc-900 text-white py-5 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 disabled:bg-zinc-300"
+              className="w-full bg-zinc-900 disabled:bg-zinc-400 text-white py-5 rounded-2xl font-bold text-lg flex items-center justify-center gap-3 shadow-xl shadow-zinc-200 active:scale-[0.98] transition-all"
             >
               {isPlacingOrder ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Placing Order...</span>
-                </>
+                <Loader2 className="w-6 h-6 animate-spin" />
               ) : (
                 <>
-                  <div className="flex flex-col items-start leading-none">
-                    <span className="text-[10px] opacity-70 uppercase tracking-widest font-medium">Checkout</span>
-                    <span className="text-lg">Place Order</span>
-                  </div>
-                  <div className="h-8 w-[1px] bg-white/20 mx-2" />
-                  <div className="flex items-center gap-1">
-                    <span className="text-lg font-black">₹{totalAmount.toFixed(2)}</span>
-                    <ChevronRight className="w-5 h-5" />
-                  </div>
+                  <span>Place Order</span>
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                  <span>₹{subtotal.toFixed(2)}</span>
                 </>
               )}
             </button>

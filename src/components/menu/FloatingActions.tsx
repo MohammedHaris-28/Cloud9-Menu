@@ -1,76 +1,187 @@
-import { Bell, MessageSquare, Sparkles } from "lucide-react";
-import { toast } from "sonner";
+import { useEffect, useState } from "react";
+import {
+  Sparkles,
+  MessageSquare,
+  Instagram,
+  Facebook,
+  Mail,
+  Phone,
+  X
+} from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface FloatingActionsProps {
-  onReviewClick: () => void;
+  restaurantId: string;
 }
 
-const FloatingActions = ({ onReviewClick }: FloatingActionsProps) => {
-  const handleCallWaiter = () => {
-    toast.success("Waiter Notified", {
-      description: "A server is on their way to your table.",
-      icon: <Bell className="w-4 h-4 text-orange-500" />,
-      className: "rounded-[1.5rem] border-none shadow-2xl bg-white/90 backdrop-blur-md",
-    });
+const FloatingActions = ({ restaurantId }: FloatingActionsProps) => {
+  const [open, setOpen] = useState(false);
+  const [restaurant, setRestaurant] = useState<any>(null);
+const [loading, setLoading] = useState(true);
+  // 🔹 Fetch restaurant data
+  useEffect(() => {
+  const fetchRestaurant = async () => {
+    if (!restaurantId) return;
+
+    const { data, error } = await supabase
+      .from("restaurants")
+      .select(`
+  instagram,
+  facebook,
+  whatsapp,
+  email,
+  google_review_url,
+  website_url,
+  zomato_url,
+  swiggy_url
+`)
+      .eq("id", restaurantId)
+      .single();
+
+    console.log("FLOATING DATA:", data, error);
+
+    setRestaurant(data);
+    setLoading(false);
   };
 
-  // Define our custom ring animation as a string
-  const ringAnimation = `
-    @keyframes ring {
-      0% { transform: rotate(0); }
-      10% { transform: rotate(15deg); }
-      20% { transform: rotate(-15deg); }
-      30% { transform: rotate(10deg); }
-      40% { transform: rotate(-10deg); }
-      50% { transform: rotate(0); }
-      100% { transform: rotate(0); }
-    }
-    .animate-ring {
-      animation: ring 1.5s ease infinite;
-    }
-  `;
+  fetchRestaurant();
+}, [restaurantId]);
 
+  // 🔹 Helper to open links safely
+  const openLink = (url?: string) => {
+    if (!url) return;
+    window.open(url, "_blank");
+  };
+const hasAnyLinks =
+  restaurant?.whatsapp ||
+  restaurant?.instagram ||
+  restaurant?.facebook ||
+  restaurant?.email ||
+  restaurant?.google_review_url ||
+  restaurant?.website_url ||
+  restaurant?.zomato_url ||
+  restaurant?.swiggy_url;
   return (
-    <div className="fixed bottom-28 right-5 z-40 flex flex-col gap-4">
-      {/* Injecting the custom animation style safely */}
-      <style dangerouslySetInnerHTML={{ __html: ringAnimation }} />
-
-      {/* Call Waiter Button */}
-      <div className="relative group">
-        <div className="absolute inset-0 bg-orange-500/20 rounded-2xl animate-pulse blur-xl group-hover:bg-orange-500/30 transition-all" />
-        
+    <>
+      {/* 🔥 FLOATING BUTTON */}
+      <div className="fixed bottom-28 right-5 z-40">
         <button
-          onClick={handleCallWaiter}
-          className="relative flex items-center justify-center gap-3 bg-zinc-900 text-white p-4 rounded-2xl shadow-xl shadow-zinc-900/20 transition-all duration-300 active:scale-90 hover:-translate-y-1 hover:bg-black group"
+          onClick={() => setOpen(true)}
+          className="flex items-center justify-center bg-zinc-900 text-white p-4 rounded-2xl shadow-xl hover:scale-105 transition-all"
         >
-          <div className="relative">
-            <Bell className="w-5 h-5 group-hover:animate-ring" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full border-2 border-zinc-900" />
-          </div>
-          <span className="text-xs font-black uppercase tracking-widest hidden sm:block">
-            Call Waiter
-          </span>
+          <Sparkles className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Review Button */}
-      <button
-        onClick={onReviewClick}
-        className="flex items-center justify-center gap-3 bg-white/80 backdrop-blur-xl text-zinc-900 p-4 rounded-2xl border border-white shadow-xl shadow-black/5 transition-all duration-300 active:scale-90 hover:-translate-y-1 hover:bg-white"
-      >
-        <MessageSquare className="w-5 h-5 text-zinc-500" />
-        <span className="text-xs font-black uppercase tracking-widest hidden sm:block">
-          Give Feedback
-        </span>
-        <Sparkles className="w-3.5 h-3.5 text-orange-400 hidden sm:block" />
-      </button>
+      {/* 🔥 OVERLAY */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-50"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
-      <div className="text-right pr-1">
-        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.2em] pointer-events-none">
-          Service
-        </span>
+      {/* 🔥 BOTTOM SHEET */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-[2rem] p-6 transition-transform duration-300 ${
+          open ? "translate-y-0" : "translate-y-full"
+        }`}
+      >
+        {/* HEADER */}
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-lg">Connect with us</h3>
+          <button onClick={() => setOpen(false)}>
+            <X />
+          </button>
+        </div>
+
+        {/* ACTION BUTTONS */}
+        <div className="grid grid-cols-2 gap-4">
+
+          {/* WhatsApp */}
+          {restaurant?.whatsapp && (
+            <button
+              onClick={() => openLink(restaurant.whatsapp)}
+              className="flex items-center gap-3 p-4 rounded-xl bg-green-50 hover:bg-green-100"
+            >
+              <Phone className="text-green-600" />
+              <span className="font-semibold">WhatsApp</span>
+            </button>
+          )}
+
+          {/* Instagram */}
+          {restaurant?.instagram && (
+            <button
+              onClick={() => openLink(restaurant.instagram)}
+              className="flex items-center gap-3 p-4 rounded-xl bg-pink-50 hover:bg-pink-100"
+            >
+              <Instagram className="text-pink-600" />
+              <span className="font-semibold">Instagram</span>
+            </button>
+          )}
+
+          {/* Facebook */}
+          {restaurant?.facebook && (
+            <button
+              onClick={() => openLink(restaurant.facebook)}
+              className="flex items-center gap-3 p-4 rounded-xl bg-blue-50 hover:bg-blue-100"
+            >
+              <Facebook className="text-blue-600" />
+              <span className="font-semibold">Facebook</span>
+            </button>
+          )}
+
+          {/* Email */}
+          {restaurant?.email && (
+            <button
+              onClick={() => openLink(`mailto:${restaurant.email}`)}
+              className="flex items-center gap-3 p-4 rounded-xl bg-gray-100 hover:bg-gray-200"
+            >
+              <Mail />
+              <span className="font-semibold">Email</span>
+            </button>
+          )}
+          {restaurant?.website_url && (
+  <button
+    onClick={() => openLink(restaurant.website_url)}
+    className="flex items-center gap-3 p-4 rounded-xl bg-zinc-100 hover:bg-zinc-200"
+  >
+    🌐
+    <span className="font-semibold">Website</span>
+  </button>
+)}
+{restaurant?.zomato_url && (
+  <button
+    onClick={() => openLink(restaurant.zomato_url)}
+    className="flex items-center gap-3 p-4 rounded-xl bg-red-50 hover:bg-red-100"
+  >
+    🍽️
+    <span className="font-semibold">Zomato</span>
+  </button>
+)}
+{restaurant?.swiggy_url && (
+  <button
+    onClick={() => openLink(restaurant.swiggy_url)}
+    className="flex items-center gap-3 p-4 rounded-xl bg-orange-50 hover:bg-orange-100"
+  >
+    🍽️
+    <span className="font-semibold">Swiggy</span>
+  </button>
+)}
+          {/* Review */}
+          {restaurant?.google_review_url && (
+            <button
+              onClick={() => openLink(restaurant.google_review_url)}
+              className="col-span-2 flex items-center justify-center gap-3 p-4 rounded-xl bg-orange-100 hover:bg-orange-200"
+            >
+              <MessageSquare className="text-orange-600" />
+              <span className="font-bold">Leave a Review</span>
+              <Sparkles className="w-4 h-4 text-orange-500" />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 

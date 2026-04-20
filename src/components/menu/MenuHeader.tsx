@@ -37,9 +37,17 @@ const MenuHeader = ({
           "flex items-center gap-3 transition-all duration-300",
           isSearchOpen ? "hidden sm:flex shrink-0" : "flex shrink-0"
         )}>
-          <div className="h-10 w-10 rounded-2xl bg-[#1a4d3e] flex items-center justify-center shadow-lg shadow-emerald-900/10">
-            <UtensilsCrossed className="h-5 w-5 text-white" />
-          </div>
+          <div className="h-10 w-10 rounded-2xl overflow-hidden shadow-lg shadow-emerald-900/10 bg-white flex items-center justify-center">
+  {restaurant?.logo ? (
+    <img
+      src={restaurant.logo}
+      alt="logo"
+      className="h-full w-full object-cover"
+    />
+  ) : (
+    <UtensilsCrossed className="h-5 w-5 text-[#1a4d3e]" />
+  )}
+</div>
           
           <div className="flex flex-col">
             <span className="text-base md:text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-100 leading-tight truncate max-w-[120px] md:max-w-none">
@@ -48,8 +56,10 @@ const MenuHeader = ({
             <div className="flex items-center gap-1.5">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-               {table?.name || `Table ${table?.table_number || "--"}`}
-              </span>
+  {table
+    ? `${table.name} • Table ${table.table_number}`
+    : "Table --"}
+</span>
             </div>
           </div>
         </div>
