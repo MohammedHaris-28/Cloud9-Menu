@@ -15,11 +15,20 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/menu/:tableId" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+
+  {/* Homepage (optional landing page later) */}
+  <Route path="/" element={<div>Home Page</div>} />
+
+  {/* ✅ OLD UUID ROUTE (VERY IMPORTANT) */}
+  <Route path="/menu/:tableId" element={<Index />} />
+
+  {/* ✅ NEW SLUG ROUTE */}
+  <Route path="/menu/:slug/:tableSlug" element={<Index />} />
+
+  {/* 404 */}
+  <Route path="*" element={<NotFound />} />
+
+</Routes>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
