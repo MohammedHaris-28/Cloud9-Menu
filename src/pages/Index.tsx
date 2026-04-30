@@ -13,6 +13,7 @@ import { Loader2, ShoppingBag, ChevronRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { MenuItem, MenuCombo, Category } from "@/data/menuData";
+import MenuSplash from "@/components/MenuSplash"; 
 
 const Index = () => {
   const { slug, tableSlug } = useParams(); // ✅ UPDATED
@@ -31,7 +32,16 @@ const Index = () => {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [cartOpen, setCartOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+ 
 
+useEffect(() => {
+  const timer = setTimeout(() => {
+    setShowSplash(false);
+  }, 2500);
+
+  return () => clearTimeout(timer);
+}, []);
   /* ✅ Extract table number from slug */
   const extractTableNumber = (slug: string) => {
     const match = slug?.match(/table-(\d+)/);
@@ -207,6 +217,10 @@ if (!tableData && tableSlug.startsWith("table-")) {
         Invalid Table QR
       </div>
     );
+  // REPLACE YOUR OLD if(showSplash) BLOCK WITH THIS:
+if (showSplash) {
+  return <MenuSplash onFinish={() => setShowSplash(false)} />;
+}
 
   if (loading)
     return (

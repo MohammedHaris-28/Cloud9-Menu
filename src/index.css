@@ -4,110 +4,185 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ================= BASE THEME ================= */
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 220 20% 10%;
+    --background: 210 40% 99%;
+    --foreground: 215 25% 15%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    --card-foreground: 215 25% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 10%;
+    --popover-foreground: 215 25% 15%;
 
-    --primary: 160 60% 20%;
-    --primary-foreground: 60 20% 98%;
+    /* 🔵 PRIMARY BLUE */
+    --primary: 220 100% 65%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 15% 95%;
-    --secondary-foreground: 220 20% 10%;
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 215 25% 15%;
 
-    --muted: 210 15% 95%;
-    --muted-foreground: 220 10% 45%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 10% 50%;
 
-    --accent: 38 92% 50%;
-    --accent-foreground: 220 20% 10%;
+    --accent: 210 40% 94%;
+    --accent-foreground: 215 25% 15%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive-foreground: 210 40% 98%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 160 60% 20%;
+    --border: 210 20% 92%;
+    --input: 210 20% 92%;
+    --ring: 210 100% 65%;
 
     --radius: 0.75rem;
 
-    --success: 152 60% 40%;
+    --success: 142 70% 45%;
     --success-foreground: 0 0% 100%;
 
+    /* 🧠 TYPOGRAPHY */
     --font-display: 'Playfair Display', serif;
     --font-body: 'DM Sans', sans-serif;
 
-    --shadow-card: 0 1px 3px 0 hsl(220 20% 10% / 0.04), 0 1px 2px -1px hsl(220 20% 10% / 0.04);
-    --shadow-card-hover: 0 10px 25px -5px hsl(220 20% 10% / 0.08), 0 4px 10px -3px hsl(220 20% 10% / 0.04);
-    --shadow-float: 0 20px 40px -10px hsl(220 20% 10% / 0.15);
+    /* ✨ SHADOWS */
+    --shadow-card: 0 1px 3px 0 hsl(210 40% 20% / 0.06),
+                   0 1px 2px -1px hsl(210 40% 20% / 0.05);
+
+    --shadow-card-hover: 0 10px 25px -5px hsl(210 60% 40% / 0.15),
+                         0 4px 10px -3px hsl(210 60% 40% / 0.08);
+
+    --shadow-float: 0 20px 40px -10px hsl(210 80% 50% / 0.2);
   }
 }
 
+/* ================= GLOBAL ================= */
 @layer base {
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground font-body antialiased;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
   }
 }
 
+/* ================= UTILITIES ================= */
 @layer utilities {
   .font-display {
     font-family: var(--font-display);
   }
+
   .font-body {
     font-family: var(--font-body);
   }
+
   .shadow-card {
     box-shadow: var(--shadow-card);
   }
+
   .shadow-card-hover {
     box-shadow: var(--shadow-card-hover);
   }
+
   .shadow-float {
     box-shadow: var(--shadow-float);
   }
 }
 
+/* ================= COMPONENTS ================= */
 @layer components {
+
+  /* 🍽 Menu Cards */
   .menu-card {
     @apply bg-card rounded-xl shadow-card transition-all duration-200 ease-out;
   }
+
   .menu-card:hover {
     @apply shadow-card-hover;
     transform: translateY(-2px);
   }
+
   .menu-card-disabled {
     @apply opacity-50 pointer-events-none;
   }
+
+  /* 🏷 Category Tabs */
   .category-tab {
     @apply px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 whitespace-nowrap;
   }
+
   .category-tab-active {
     @apply bg-primary text-primary-foreground;
   }
+
   .category-tab-inactive {
     @apply bg-secondary text-muted-foreground hover:bg-secondary/80;
   }
+
+  /* 🚀 Floating Button */
   .fab-button {
     @apply flex items-center gap-2 px-4 py-3 rounded-full shadow-float transition-all duration-200 hover:scale-105 active:scale-95 text-sm font-medium;
   }
+
+  /* 🪑 Table Badge */
   .badge-table {
-    @apply bg-accent/15 text-accent px-2.5 py-0.5 rounded-full text-xs font-semibold;
+    @apply bg-primary/10 text-primary px-2.5 py-0.5 rounded-full text-xs font-semibold;
   }
+
+  /* ➕ Add Button */
   .add-button {
     @apply bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 active:scale-95 hover:opacity-90;
   }
+
+  /* ✅ Status */
   .status-available {
     @apply text-success;
   }
+
   .status-unavailable {
     @apply text-destructive;
   }
+}
+
+@keyframes fadeInKannada {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  50% {
+    opacity: 0.6;
+    transform: translateY(0px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px) scale(1);
+  }
+}
+
+.animate-fadeInKannada {
+  animation: fadeInKannada 1.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.8s ease forwards;
+}
+
+.animate-slideUp {
+  animation: slideUp 1s ease forwards;
 }
