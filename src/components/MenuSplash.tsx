@@ -1,22 +1,30 @@
 import { useEffect, useState } from "react";
+import { UtensilsCrossed } from "lucide-react";
 
 interface Props {
   onFinish: () => void;
+  // Ensure the prop matches exactly what your data source provides
+  restaurant?: {
+    name?: string;
+    logo?: string;
+  } | null;
 }
 
-export default function MenuSplash({ onFinish }: Props) {
-  // Stages: 0: Init, 1: Intro, 2: Reveal, 3: Cinematic Exit
+export default function MenuSplash({ onFinish, restaurant }: Props) {
   const [stage, setStage] = useState(0);
 
   useEffect(() => {
+    // Stage 1: Fade in the UI
     const tIntro = setTimeout(() => setStage(1), 100);
-    const tReveal = setTimeout(() => setStage(2), 1400); 
-    const tExit = setTimeout(() => setStage(3), 4500); 
-    const tFinish = setTimeout(() => onFinish(), 5800); 
+    
+    // Stage 2: Start the exit transition (Total 3 seconds)
+    const tExit = setTimeout(() => setStage(2), 2700); 
+    
+    // Stage 3: Complete and unmount
+    const tFinish = setTimeout(() => onFinish(), 3400); 
 
     return () => {
       clearTimeout(tIntro);
-      clearTimeout(tReveal);
       clearTimeout(tExit);
       clearTimeout(tFinish);
     };
@@ -24,103 +32,81 @@ export default function MenuSplash({ onFinish }: Props) {
 
   return (
     <div
-      className={`fixed inset-0 z-[9999] h-screen w-full flex flex-col items-center justify-center overflow-hidden bg-white transition-all duration-[1800ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
-        stage === 3 ? "opacity-0 scale-95 blur-md pointer-events-none" : "opacity-100 scale-100 blur-0"
+      className={`fixed inset-0 z-[9999] h-screen w-full flex flex-col items-center justify-center bg-white transition-all duration-[800ms] ease-in-out ${
+        stage === 2 ? "opacity-0 scale-105 blur-md" : "opacity-100"
       }`}
     >
-      {/* 1. PREMIUM AMBIENCE (Mesh Gradient) */}
-      <div className="absolute inset-0 z-0">
-        <div 
-          className={`absolute rounded-full transition-opacity duration-[3000ms] ${stage >= 1 ? 'opacity-100' : 'opacity-0'}`} 
-          style={{
-            width: '100vw', height: '100vw',
-            background: 'radial-gradient(circle, rgba(235,245,255,0.6) 0%, rgba(255,255,255,0) 70%)',
-            animation: 'float-slow 20s ease-in-out infinite',
-            top: '-20%', left: '-10%'
-          }}
-        />
-      </div>
+      {/* Soft Background Accents */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(244,244,245,0.8)_0%,rgba(255,255,255,1)_100%)]" />
 
-      {/* 2. MAIN CONTENT */}
-      <div className="z-10 flex flex-col items-center">
+      <div className="relative z-10 flex flex-col items-center px-8">
         
-        {/* UNIQUE ICON: Intersecting Architectural Frames */}
+        {/* LOGO CONTAINER */}
         <div
-          className={`relative w-24 h-24 flex items-center justify-center mb-16 transition-all duration-[2000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
-            stage >= 1 ? "opacity-100 scale-100 rotate-0" : "opacity-0 scale-50 rotate-12"
+          className={`w-24 h-24 mb-10 transition-all duration-1000 ease-out ${
+            stage >= 1 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
           }`}
         >
-          {/* Vertical Frame */}
-          <div className="absolute w-12 h-20 border-[1px] border-blue-600/30 animate-[frame-breathe_4s_ease-in-out_infinite]" />
-          
-          {/* Horizontal Frame */}
-          <div className="absolute w-20 h-12 border-[1px] border-blue-400/40 animate-[frame-breathe_4s_ease-in-out_infinite_reverse]" />
-          
-          {/* Central Point */}
-          <div className="w-1.5 h-1.5 bg-blue-600 rotate-45 shadow-[0_0_10px_rgba(37,99,235,0.4)]" />
+          <div className="w-full h-full rounded-[2.5rem] bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-zinc-100 flex items-center justify-center p-5 relative">
+            {restaurant?.logo ? (
+              <img
+                src={restaurant.logo}
+                alt="Logo"
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <UtensilsCrossed className="w-10 h-10 text-zinc-300" />
+            )}
+            
+            {/* Spinning ambient border */}
+            <div className="absolute -inset-1 border border-zinc-50 rounded-[2.7rem] animate-[spin_8s_linear_infinite]" />
+          </div>
         </div>
 
-        {/* TEXT SECTION: Optimized for Kannada Script */}
-        <div className="relative overflow-hidden h-[140px] flex items-center justify-center px-10">
-          <h1
-            className={`text-7xl md:text-9xl font-black transition-all duration-[2000ms] cubic-bezier(0.16, 1, 0.3, 1) ${
-              stage >= 2 ? "translate-y-0 opacity-100" : "translate-y-full opacity-0"
-            }`}
-            style={{ 
-              lineHeight: '1.4',
-              paddingBottom: '20px' 
-            }}
-          >
-             <span className="bg-clip-text text-transparent bg-gradient-to-b from-slate-900 via-blue-900 to-slate-900">
-                ಸ್ವಾಗತ
-             </span>
+        {/* BRANDING TEXT */}
+        <div className="flex flex-col items-center space-y-3">
+          <p className={`text-zinc-400 text-[10px] font-black uppercase tracking-[0.4em] transition-all duration-700 delay-300 ${
+            stage >= 1 ? "opacity-100" : "opacity-0"
+          }`}>
+            Welcome to
+          </p>
+          
+          <h1 className={`text-3xl md:text-5xl font-black text-zinc-900 tracking-tight transition-all duration-1000 delay-500 text-center ${
+            stage >= 1 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+          }`}>
+            {/* Fallback to "Our Restaurant" if the name hasn't loaded yet */}
+            {restaurant?.name || "Our Restaurant"}
           </h1>
-          
-          {/* Elegant Shine Polish */}
-          <div 
-            className={`absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full ${
-              stage >= 2 ? "animate-[shine-polish_3s_ease-in-out_infinite_delay-1000ms]" : ""
-            }`}
-          />
         </div>
 
-        {/* SUBTITLE: Signature Label */}
-        <div className="overflow-hidden">
-            <p
-              className={`mt-2 text-slate-400 text-[10px] tracking-[1em] uppercase font-bold transition-all duration-[2000ms] ${
-                stage >= 2 ? "translate-y-0 opacity-100" : "translate-y-full opacity-0"
-              }`}
-              style={{ transitionDelay: '2000ms' }}
-            >
-              Exclusive Dining
-            </p>
+        {/* SLIM PROGRESS INDICATOR */}
+        <div className="mt-12 w-40 h-[1.5px] bg-zinc-100 relative overflow-hidden rounded-full">
+          <div 
+            className="absolute inset-y-0 left-0 bg-zinc-900 transition-all ease-linear"
+            style={{ 
+                width: stage >= 1 ? '100%' : '0%',
+                transitionDuration: '2600ms' 
+            }}
+          />
         </div>
       </div>
 
-      {/* 3. REFINED PROGRESS INDICATOR */}
-      <div className="absolute bottom-24 flex flex-col items-center gap-4">
-        <div className="w-48 h-[1px] bg-slate-100 relative overflow-hidden">
-            <div
-              className={`h-full bg-blue-600 transition-all ease-in-out ${
-                stage >= 1 ? "w-full" : "w-0"
-              }`}
-              style={{ transitionDuration: '4500ms' }}
-            />
+      {/* SIGNATURE FOOTER */}
+      <div className={`absolute bottom-12 transition-all duration-1000 delay-1000 ${
+        stage >= 1 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+      }`}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-[10px] text-zinc-400 font-bold tracking-[0.25em] uppercase">
+            Powered by <span className="text-zinc-900 font-black">#2Code</span>
+          </span>
         </div>
       </div>
 
       <style>{`
-        @keyframes frame-breathe {
-          0%, 100% { transform: scale(1); opacity: 0.3; }
-          50% { transform: scale(1.1); opacity: 0.8; }
-        }
-        @keyframes shine-polish {
-          0% { transform: translateX(-150%) skewX(-30deg); }
-          40%, 100% { transform: translateX(150%) skewX(-30deg); }
-        }
-        @keyframes float-slow {
-          0%, 100% { transform: translate(0, 0); }
-          50% { transform: translate(2%, 5%); }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

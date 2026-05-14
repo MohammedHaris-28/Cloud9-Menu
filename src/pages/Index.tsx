@@ -32,16 +32,10 @@ const Index = () => {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [cartOpen, setCartOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
  
 
-useEffect(() => {
-  const timer = setTimeout(() => {
-    setShowSplash(false);
-  }, 2500);
 
-  return () => clearTimeout(timer);
-}, []);
   /* ✅ Extract table number from slug */
   const extractTableNumber = (slug: string) => {
     const match = slug?.match(/table-(\d+)/);
@@ -165,6 +159,11 @@ if (!tableData && tableSlug.startsWith("table-")) {
       setMenuItems(allItems);
       setCombos(allCombos);
       setRestaurant(restRes.data);
+      setShowSplash(true);
+
+setTimeout(() => {
+  setShowSplash(false);
+}, 3000);
     } catch (err) {
       toast.error("Failed to load menu");
     } finally {
@@ -219,7 +218,12 @@ if (!tableData && tableSlug.startsWith("table-")) {
     );
   // REPLACE YOUR OLD if(showSplash) BLOCK WITH THIS:
 if (showSplash) {
-  return <MenuSplash onFinish={() => setShowSplash(false)} />;
+  return (
+    <MenuSplash
+      onFinish={() => setShowSplash(false)}
+      restaurant={restaurant}
+    />
+  );
 }
 
   if (loading)
