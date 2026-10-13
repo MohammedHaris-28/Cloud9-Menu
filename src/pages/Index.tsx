@@ -24,12 +24,59 @@ type RestaurantRow = {
 
 type TableRow = {
   id: string;
-  restaurant_id: string;
+  restaurant_id?: string;
   table_number: number;
   short_id?: string | null;
   is_active?: boolean | null;
+  status?: string | null;
   [key: string]: unknown;
 };
+
+const RESTAURANT_ID_HINT = "b60fd1f9-6255-44dc-adc8-122783bb75b5";
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+/**
+ * Resolves table IDs through the qr_lookup_table RPC. This avoids applying
+ * SQL LIKE directly to a UUID column, which causes:
+ * operator does not exist: uuid ~~ unknown
+ *
+ * Required RPC:
+ * public.qr_lookup_table(p_restaurant_id uuid, p_table_prefix text)
+ */
+async function lookupTableByPrefix(
+  restaurantId: string,
+  tablePrefix: string
+): Promise<TableRow | null> {
+  const { data, error } = await supabase.rpc("qr_lookup_table", {
+    p_restaurant_id: restaurantId,
+    p_table_prefix: tablePrefix,
+  });
+
+  if (error) {
+    throw new Error(
+      `Table lookup failed (${error.code ?? "unknown"}): ${error.message}. ` +
+        "Confirm the qr_lookup_table RPC exists and grants EXECUTE to anon."
+    );
+  }
+
+  const rows = (data ?? []) as TableRow[];
+  if (rows.length === 0) return null;
+
+  // A prefix must resolve to exactly one table. Never silently choose a table
+  // if two UUIDs share the same prefix.
+  if (rows.length !== 1) {
+    throw new Error(
+      "This table QR code is ambiguous. Please ask staff to regenerate the QR code."
+    );
+  }
+
+  return rows[0];
+}
 
 const Index = () => {
   const { slug, tableSlug } = useParams<{ slug: string; tableSlug: string }>();
@@ -59,121 +106,124 @@ const Index = () => {
       setLoading(true);
       setInvalidTable(false);
       setLoadError(null);
+      setRestaurant(null);
+      setTable(null);
+      setMenuItems([]);
+      setCombos([]);
+      setCategories([]);
+      setActiveCategory("All");
 
       if (!slug || !tableSlug) {
         setInvalidTable(true);
+        setLoadError("The restaurant slug or table URL is missing.");
         setLoading(false);
         return;
       }
 
       try {
-        // Resolve restaurant first. This also scopes all table lookups to the
-        // restaurant in the URL, avoiding accidental cross-restaurant matches.
+        // Public-safe view: do not query the full restaurants table from anon.
         const { data: restaurantData, error: restaurantError } = await supabase
-          .from("restaurants")
+          .from("qr_public_restaurants")
           .select("*")
           .eq("slug", slug)
           .maybeSingle();
 
-        if (restaurantError) throw restaurantError;
-        if (!restaurantData) {
-          if (!cancelled) setInvalidTable(true);
-          return;
+        if (restaurantError) {
+          throw new Error(
+            `Restaurant lookup failed (${restaurantError.code ?? "unknown"}): ${restaurantError.message}`
+          );
         }
 
-        const restaurantId = restaurantData.id as string;
+        if (!restaurantData) {
+          throw new Error(
+            `Restaurant "${slug}" was not found in qr_public_restaurants. Check the slug and public view permissions.`
+          );
+        }
+
+        const restaurantId = String(restaurantData.id);
         let tableData: TableRow | null = null;
 
-        // Older QR format: /menu/:slug/:tableUUID
-        if (tableSlug.length === 36) {
-          const { data, error } = await supabase
-            .from("tables")
-            .select("*")
-            .eq("restaurant_id", restaurantId)
-            .eq("id", tableSlug)
-            .maybeSingle();
-
-          if (error) throw error;
-          tableData = (data as TableRow | null) ?? null;
-        }
-
-        // Current QR format: table-1-t62b8be or table-1-62b8be.
-        // The part after "-t" is treated as the short ID, but both stored
-        // conventions (with/without leading "t") are supported.
-        if (!tableData) {
-          const hybridMatch = tableSlug.match(/^table-(\d+)-t?(.+)$/i);
+        // Supported current format: table-1-t62b8be
+        // Also supports a complete UUID as the table segment.
+        if (isUuid(tableSlug)) {
+          tableData = await lookupTableByPrefix(restaurantId, tableSlug);
+        } else {
+          const hybridMatch = tableSlug.match(
+            /^table-(\d+)-t?([0-9a-f]{4,36})$/i
+          );
 
           if (hybridMatch) {
             const tableNumber = Number(hybridMatch[1]);
-            const shortId = hybridMatch[2];
+            const idPrefix = hybridMatch[2];
 
-            const shortIdCandidates = Array.from(
-              new Set([shortId, `t${shortId}`, `-${shortId}`, `t-${shortId}`])
-            );
+            tableData = await lookupTableByPrefix(restaurantId, idPrefix);
 
-            for (const candidate of shortIdCandidates) {
-              const { data, error } = await supabase
-                .from("tables")
-                .select("*")
-                .eq("restaurant_id", restaurantId)
-                .eq("short_id", candidate)
-                .maybeSingle();
-
-              if (error) throw error;
-              if (data) {
-                tableData = data as TableRow;
-                break;
-              }
-            }
-
-            // Fallback to the table number only within the matched restaurant.
+            // Only use table-number fallback for old/legacy links when the
+            // UUID-prefix lookup returns no match. This query returns minimal
+            // columns and must be permitted by your intended public table policy.
             if (!tableData && Number.isFinite(tableNumber)) {
               const { data, error } = await supabase
-                .from("tables")
-                .select("*")
+                .from("restaurant_tables")
+                .select("id, restaurant_id, table_number, short_id, is_active, status")
                 .eq("restaurant_id", restaurantId)
                 .eq("table_number", tableNumber)
+                .eq("is_active", true)
                 .maybeSingle();
 
-              if (error) throw error;
+              if (error) {
+                throw new Error(
+                  `Legacy table lookup failed (${error.code ?? "unknown"}): ${error.message}`
+                );
+              }
               tableData = (data as TableRow | null) ?? null;
             }
           } else {
-            // Legacy format: table-1
+            // Legacy URL format: /menu/:slug/table-1
             const numberMatch = tableSlug.match(/^table-(\d+)$/i);
             if (numberMatch) {
               const { data, error } = await supabase
-                .from("tables")
-                .select("*")
+                .from("restaurant_tables")
+                .select("id, restaurant_id, table_number, short_id, is_active, status")
                 .eq("restaurant_id", restaurantId)
                 .eq("table_number", Number(numberMatch[1]))
+                .eq("is_active", true)
                 .maybeSingle();
 
-              if (error) throw error;
+              if (error) {
+                throw new Error(
+                  `Legacy table lookup failed (${error.code ?? "unknown"}): ${error.message}`
+                );
+              }
               tableData = (data as TableRow | null) ?? null;
             }
           }
         }
 
         if (!tableData) {
-          if (!cancelled) setInvalidTable(true);
-          return;
+          throw new Error(
+            `Table "${tableSlug}" was not found or is not active for restaurant "${slug}".`
+          );
         }
 
-        // Do not allow a disabled table QR to open the ordering menu.
         if (tableData.is_active === false) {
-          if (!cancelled) {
-            setInvalidTable(true);
-            setLoadError("This table is currently inactive. Please ask staff for assistance.");
-          }
-          return;
+          throw new Error("This table is inactive. Please ask staff to activate it.");
         }
 
-        const [menuRes, comboRes] = await Promise.all([
+        // Load the menu in separate requests. This avoids depending on an
+        // implicit nested relationship between menu_categories and menu_items.
+        const [categoriesRes, itemsRes, comboRes] = await Promise.all([
           supabase
             .from("menu_categories")
-            .select("*, menu_items(*)")
-            .eq("restaurant_id", restaurantId),
+            .select("*")
+            .eq("restaurant_id", restaurantId)
+            .eq("is_active", true)
+            .order("sort_order", { ascending: true }),
+          supabase
+            .from("menu_items")
+            .select("*")
+            .eq("restaurant_id", restaurantId)
+            .eq("is_available", true)
+            .order("sort_order", { ascending: true }),
           supabase
             .from("menu_combos")
             .select("*, menu_combo_items(quantity, menu_items(name))")
@@ -181,17 +231,33 @@ const Index = () => {
             .eq("is_available", true),
         ]);
 
-        if (menuRes.error) throw menuRes.error;
-        if (comboRes.error) throw comboRes.error;
-
-        const allItems: MenuItem[] =
-          (menuRes.data ?? []).flatMap((category: any) =>
-            (category.menu_items ?? []).map((item: any) => ({
-              ...item,
-              category_id: category.id,
-              category_name: category.name,
-            }))
+        if (categoriesRes.error) {
+          throw new Error(
+            `Menu categories failed (${categoriesRes.error.code ?? "unknown"}): ${categoriesRes.error.message}`
           );
+        }
+        if (itemsRes.error) {
+          throw new Error(
+            `Menu items failed (${itemsRes.error.code ?? "unknown"}): ${itemsRes.error.message}`
+          );
+        }
+        if (comboRes.error) {
+          throw new Error(
+            `Menu combos failed (${comboRes.error.code ?? "unknown"}): ${comboRes.error.message}`
+          );
+        }
+
+        const categoryRows = categoriesRes.data ?? [];
+        const categoryNameById = new Map<string, string>(
+          categoryRows.map((category: any) => [String(category.id), String(category.name)])
+        );
+
+        const allItems: MenuItem[] = (itemsRes.data ?? [])
+          .filter((item: any) => categoryNameById.has(String(item.category_id)))
+          .map((item: any) => ({
+            ...item,
+            category_name: categoryNameById.get(String(item.category_id)) ?? "",
+          }));
 
         const allCombos: MenuCombo[] = (comboRes.data ?? []).map((combo: any) => ({
           ...combo,
@@ -205,7 +271,7 @@ const Index = () => {
 
         setTable(tableData);
         setRestaurant(restaurantData as RestaurantRow);
-        setCategories((menuRes.data ?? []) as Category[]);
+        setCategories(categoryRows as Category[]);
         setMenuItems(allItems);
         setCombos(allCombos);
         setShowSplash(true);
@@ -215,13 +281,16 @@ const Index = () => {
         }, 3000);
       } catch (error) {
         console.error("Failed to load QR menu:", error);
+
         if (!cancelled) {
-          setLoadError(
+          const message =
             error instanceof Error
               ? error.message
-              : "An unexpected error occurred while loading the menu."
-          );
-          toast.error("Failed to load menu. Please try again.");
+              : "An unexpected error occurred while loading the menu.";
+
+          setLoadError(message);
+          setInvalidTable(false);
+          toast.error(message);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -254,7 +323,7 @@ const Index = () => {
             activeCategory === "All" || item.category_id === activeCategory;
           return (
             matchesCategory &&
-            item.name.toLowerCase().includes(query) &&
+            String(item.name ?? "").toLowerCase().includes(query) &&
             item.is_available
           );
         });
@@ -262,7 +331,8 @@ const Index = () => {
     const filteredCombos = isCombosTab
       ? combos.filter(
           (combo) =>
-            combo.name.toLowerCase().includes(query) && combo.is_available
+            String(combo.name ?? "").toLowerCase().includes(query) &&
+            combo.is_available
         )
       : [];
 
@@ -296,8 +366,9 @@ const Index = () => {
   if (loadError) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white px-6 text-center">
+        <ShoppingBag className="mb-4 h-10 w-10 text-zinc-300" />
         <h1 className="text-lg font-bold text-zinc-900">Unable to load menu</h1>
-        <p className="mt-2 max-w-md text-sm text-zinc-500">{loadError}</p>
+        <p className="mt-2 max-w-md break-words text-sm text-zinc-500">{loadError}</p>
         <button
           className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-white"
           onClick={() => window.location.reload()}
@@ -309,12 +380,7 @@ const Index = () => {
   }
 
   if (showSplash) {
-    return (
-      <MenuSplash
-        onFinish={() => setShowSplash(false)}
-        restaurant={restaurant}
-      />
-    );
+    return <MenuSplash onFinish={() => setShowSplash(false)} restaurant={restaurant} />;
   }
 
   return (
@@ -404,9 +470,7 @@ const Index = () => {
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 mb-1">
                 Your Order
               </span>
-              <span className="text-lg font-bold">
-                ₹{cart.totalPrice.toFixed(2)}
-              </span>
+              <span className="text-lg font-bold">₹{cart.totalPrice.toFixed(2)}</span>
             </div>
             <div className="flex items-center gap-2 bg-white/10 py-3 px-5 rounded-xl font-bold text-sm">
               <span>{cart.totalItems} Items</span>

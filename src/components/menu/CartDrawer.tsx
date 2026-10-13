@@ -79,168 +79,146 @@ const [savedPoints, setSavedPoints] = useState(0);
 
   if (!open) return null;
 
+ 
   // PLACE ORDER
   const handlePlaceOrder = async () => {
-  if (!restaurantId || !tableId) {
-    toast.error("Session expired. Please scan QR again.");
-    return;
-  }
-
-  setIsPlacingOrder(true);
-
-  try {
-    const calculatedItems = items.reduce(
-      (sum, item) => sum + item.quantity,
-      0
-    );
-
-    const calculatedPoints = Math.floor(subtotal / 10);
-
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .insert({
-        restaurant_id: restaurantId,
-        table_id: tableId,
-        status: "pending",
-        subtotal: subtotal,
-        cgst: 0,
-        sgst: 0,
-        total: subtotal,
-        tax_percentage: gstEnabled ? gstPercentage : 0,
-      })
-      .select()
-      .single();
-
-    if (orderError) throw orderError;
-
-    const orderItems = items.map((item) => ({
-      order_id: order.id,
-      menu_item_id: (item as any).included_items
-        ? null
-        : item.id,
-      combo_id: (item as any).included_items
-        ? item.id
-        : null,
-      quantity: item.quantity,
-      price: item.price,
-    }));
-
-    const { error: itemsError } = await supabase
-      .from("order_items")
-      .insert(orderItems);
-
-    if (itemsError) throw itemsError;
-
-    // SAVE ORDER DATA BEFORE CLEARING CART
-    setSavedOrderId(order.id);
-    setSavedSubtotal(subtotal);
-    setSavedItemCount(calculatedItems);
-    setSavedPoints(calculatedPoints);
-
-    // NOW CLEAR CART
-    onClear();
-
-    // SHOW CRM SCREEN
-    setShowCRMCard(true);
-
-    toast.success("Order placed successfully!");
-  } catch (error: any) {
-    toast.error(
-      "Order failed: " + (error.message || "Error")
-    );
-  } finally {
-    setIsPlacingOrder(false);
-  }
-};
-  // SAVE CRM CUSTOMER
-  const handleSaveCustomer = async () => {
-    if (!customerPhone.trim()) {
-      toast.error("Phone number required");
+    if (!restaurantId || !tableId) {
+      toast.error("Session expired. Please scan the QR code again.");
       return;
     }
 
-    if (!restaurantId || !savedOrderId) return;
+    if (items.length === 0) {
+      toast.error("Your cart is empty.");
+      return;
+    }
 
-    setIsSavingCRM(true);
+    setIsPlacingOrder(true);
 
     try {
-      // CHECK EXISTING CUSTOMER
-      const { data: existingCustomer } = await supabase
-        .from("customers")
-        .select("*")
-        .eq("restaurant_id", restaurantId)
-        .eq("phone", customerPhone)
-        .maybeSingle();
+      const calculatedItems = items.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
 
-      let customerId = existingCustomer?.id;
+      const calculatedPoints = Math.floor(subtotal / 10);
 
-      // CREATE NEW CUSTOMER
-      if (!existingCustomer) {
-        const { data: newCustomer, error: customerError } =
-          await supabase
-            .from("customers")
-            .insert({
-              restaurant_id: restaurantId,
-              name: customerName || "Guest",
-              phone: customerPhone,
-              total_orders: 1,
-              total_items: savedItemCount,
-total_spent: savedSubtotal,
-loyalty_points: savedPoints,
-              last_order_at: new Date().toISOString(),
-            })
-            .select()
-            .single();
+      // IMPORTANT: Create the order through the secure database RPC.
+      // Do not insert directly into orders or order_items from the browser.
+      const { data, error } = await supabase.rpc("qr_place_order", {
+        p_restaurant_id: restaurantId,
+        p_table_id: tableId,
 
-        if (customerError) throw customerError;
+        p_customer_name: null,
+        p_customer_phone: null,
+        p_notes: null,
 
-        customerId = newCustomer.id;
-      } else {
-        // UPDATE EXISTING CUSTOMER
-        const { error: updateError } = await supabase
-          .from("customers")
-          .update({
-            total_orders:
-  (existingCustomer.total_orders || 0) + 1,
-total_items:
-  Number(existingCustomer.total_items || 0) +
-  savedItemCount,
+        p_items: items.map((item) => {
+          const isCombo = Boolean((item as any).included_items);
 
-total_spent:
-  Number(existingCustomer.total_spent || 0) +
-  savedSubtotal,
+          return {
+            menu_item_id: isCombo ? null : item.id,
+            combo_id: isCombo ? item.id : null,
+            quantity: item.quantity,
+            selected_variant: (item as any).selected_variant ?? null,
+            notes: (item as any).notes ?? null,
+          };
+        }),
+      });
 
-loyalty_points:
-  Number(existingCustomer.loyalty_points || 0) +
-  savedPoints,
-
-            last_order_at: new Date().toISOString(),
-          })
-          .eq("id", existingCustomer.id);
-
-        if (updateError) throw updateError;
+      if (error) {
+        console.error("qr_place_order failed:", error);
+        throw new Error(error.message);
       }
 
-      // LINK CUSTOMER TO ORDER
-      await supabase
-        .from("orders")
-        .update({
-          customer_phone: customerPhone,
-          customer_name: customerName || "Guest",
-          customer_id: customerId,
-        })
-        .eq("id", savedOrderId);
+      if (!data || data.success !== true || !data.order_id) {
+        console.error("Unexpected order response:", data);
+        throw new Error(
+          data?.message || "The server did not confirm the order."
+        );
+      }
 
-      toast.success("Loyalty rewards activated 🎉");
+      // Save the ID returned by the database.
+      setSavedOrderId(data.order_id);
+      setSavedSubtotal(Number(data.subtotal ?? subtotal));
+      setSavedItemCount(calculatedItems);
+      setSavedPoints(calculatedPoints);
 
-      setShowCRMCard(false);
-      onClose();
-    } catch (error: any) {
-      toast.error(error.message);
+      // Clear cart only after the database confirms success.
+      onClear();
+      setShowCRMCard(true);
+
+      toast.success(
+        `Order #${data.order_number} placed successfully!`
+      );
+
+      console.log("Confirmed order:", data);
+    } catch (error: unknown) {
+      console.error("Place order error:", error);
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred.";
+
+      toast.error("Order failed: " + message);
     } finally {
-      setIsSavingCRM(false);
+      setIsPlacingOrder(false);
     }
   };
+
+  // SAVE CRM CUSTOMER
+ 
+const handleSaveCustomer = async () => {
+  const phone = customerPhone.trim();
+
+  if (!phone) {
+    toast.error("Phone number required");
+    return;
+  }
+
+  if (!restaurantId || !savedOrderId) {
+    toast.error("Order information is missing. Please contact staff.");
+    return;
+  }
+
+  setIsSavingCRM(true);
+
+  try {
+    const { data, error } = await supabase.rpc("qr_join_loyalty", {
+      p_restaurant_id: restaurantId,
+      p_order_id: savedOrderId,
+      p_customer_name: customerName.trim() || "Guest",
+      p_customer_phone: phone,
+      p_total_items: savedItemCount,
+      p_total_spent: savedSubtotal,
+      p_points: savedPoints,
+    });
+
+    if (error) {
+      console.error("Loyalty registration failed:", error);
+      throw new Error(error.message);
+    }
+
+    if (!data || data.success !== true) {
+      throw new Error("The server did not confirm loyalty registration.");
+    }
+
+    toast.success("Loyalty rewards activated 🎉");
+    setShowCRMCard(false);
+    onClose();
+  } catch (error: unknown) {
+    console.error("Save loyalty customer error:", error);
+
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : "Could not activate loyalty rewards."
+    );
+  } finally {
+    setIsSavingCRM(false);
+  }
+};
+
 
   return (
     <>
