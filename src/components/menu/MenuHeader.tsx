@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Search, ShoppingBag, UtensilsCrossed, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import logo from "@/assets/cloud 9.webp";
 
 interface MenuHeaderProps {
   searchQuery: string;
@@ -38,15 +39,13 @@ const MenuHeader = ({
           isSearchOpen ? "hidden sm:flex shrink-0" : "flex shrink-0"
         )}>
           <div className="h-10 w-10 rounded-2xl overflow-hidden shadow-lg shadow-emerald-900/10 bg-white flex items-center justify-center">
-  {restaurant?.logo ? (
-    <img
-      src={restaurant.logo}
-      alt="logo"
-      className="h-full w-full object-cover"
-    />
-  ) : (
-    <UtensilsCrossed className="h-5 w-5 text-[#1a4d3e]" />
-  )}
+  <span className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition duration-300 group-hover:-rotate-3 group-hover:shadow-md sm:h-12 sm:w-12">
+        <img
+          src={logo}
+          alt=""
+          className="h-full w-full object-contain p-1.5"
+        />
+      </span>
 </div>
           
           <div className="flex flex-col">

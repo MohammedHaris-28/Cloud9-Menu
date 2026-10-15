@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { UtensilsCrossed } from "lucide-react";
+import logo from "@/assets/cloud 9.webp";
 
 interface Props {
   onFinish: () => void;
@@ -48,15 +49,13 @@ export default function MenuSplash({ onFinish, restaurant }: Props) {
           }`}
         >
           <div className="w-full h-full rounded-[2.5rem] bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-zinc-100 flex items-center justify-center p-5 relative">
-            {restaurant?.logo ? (
-              <img
-                src={restaurant.logo}
-                alt="Logo"
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <UtensilsCrossed className="w-10 h-10 text-zinc-300" />
-            )}
+           <span className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition duration-300 group-hover:-rotate-3 group-hover:shadow-md sm:h-12 sm:w-12">
+        <img
+          src={logo}
+          alt=""
+          className="h-full w-full object-contain p-1.5"
+        />
+      </span>
             
             {/* Spinning ambient border */}
             <div className="absolute -inset-1 border border-zinc-50 rounded-[2.7rem] animate-[spin_8s_linear_infinite]" />
