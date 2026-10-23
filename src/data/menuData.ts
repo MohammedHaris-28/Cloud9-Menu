@@ -1,3 +1,4 @@
+
 import { supabase } from "@/lib/supabase";
 
 /* =========================
@@ -26,10 +27,11 @@ export interface MenuItem {
   created_at?: string;
 }
 
-// Support for the specific items inside a combo linked via junction table
 export interface ComboItem {
+  id?: string;
   name: string;
   quantity: number;
+  image_url?: string | null;
 }
 
 export interface MenuCombo {
@@ -43,34 +45,170 @@ export interface MenuCombo {
   is_available: boolean;
   category_id: string;
   category_name?: string;
-  included_items: ComboItem[]; 
+  included_items: ComboItem[];
   created_at: string;
 }
 
 /* =========================
-   FETCHERS (OPTIMIZED)
+   INTERNAL TYPES
 ========================= */
 
-/**
- * Fetches Categories, Menu Items, AND Combos with their joined item names.
- */
-export const fetchMenuWithCategories = async (restaurantId: string) => {
+interface RawComboItem {
+  quantity?: number | null;
+  menu_items:
+    | {
+        id?: string;
+        name?: string | null;
+        image_url?: string | null;
+      }
+    | {
+        id?: string;
+        name?: string | null;
+        image_url?: string | null;
+      }[]
+    | null;
+}
+
+interface RawCombo {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  description: string | null;
+  total_price: number | null;
+  discount_price: number | null;
+  image_url: string | null;
+  is_available: boolean;
+  category_id: string;
+  created_at: string;
+  menu_combo_items?: RawComboItem[] | null;
+}
+
+const PLACEHOLDER_IMAGE = "/placeholder.png";
+
+/* =========================
+   IMAGE HANDLER
+========================= */
+
+export const getMenuImageUrl = (path?: string | null): string => {
+  if (!path?.trim()) return PLACEHOLDER_IMAGE;
+
+  if (/^https?:\/\//i.test(path)) return path;
+
+  const { data } = supabase.storage
+    .from("menu-images")
+    .getPublicUrl(path);
+
+  return data?.publicUrl || PLACEHOLDER_IMAGE;
+};
+
+/* =========================
+   CATEGORY FETCHER
+========================= */
+
+export const fetchCategories = async (
+  restaurantId: string
+): Promise<Category[]> => {
   const { data, error } = await supabase
     .from("menu_categories")
-    .select(`
-      id,
-      name,
-      menu_items (
-        id,
-        name,
-        description,
-        price,
-        image_url,
-        category_id,
-        is_veg,
-        is_available
-      ),
-      menu_combos (
+    .select("id, name, restaurant_id")
+    .eq("restaurant_id", restaurantId)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching categories:", error);
+    throw error;
+  }
+
+  return (data ?? []) as Category[];
+};
+
+/* =========================
+   MENU ITEMS FETCHER
+========================= */
+
+export const fetchMenuItems = async (
+  restaurantId: string
+): Promise<MenuItem[]> => {
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .eq("is_available", true)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching menu items:", error);
+    throw error;
+  }
+
+  return (data ?? []) as MenuItem[];
+};
+
+/* =========================
+   COMBO MAPPER
+========================= */
+
+const mapCombo = (
+  raw: RawCombo,
+  categoryNames: Map<string, string>
+): MenuCombo => {
+  const includedItems: ComboItem[] = (
+    raw.menu_combo_items ?? []
+  ).flatMap((junction) => {
+    const linkedItems = Array.isArray(junction.menu_items)
+      ? junction.menu_items
+      : junction.menu_items
+        ? [junction.menu_items]
+        : [];
+
+    return linkedItems.flatMap((item) => {
+      if (!item.id || !item.name?.trim()) {
+        return [];
+      }
+
+      return [
+        {
+          id: item.id,
+          name: item.name,
+          image_url: item.image_url ?? null,
+          quantity: Math.max(1, Number(junction.quantity) || 1),
+        },
+      ];
+    });
+  });
+
+  return {
+    id: raw.id,
+    restaurant_id: raw.restaurant_id,
+    name: raw.name,
+    description: raw.description ?? "",
+    total_price: Number(raw.total_price ?? 0),
+    discount_price: Number(raw.discount_price ?? 0),
+    image_url: raw.image_url ?? "",
+    is_available: raw.is_available,
+    category_id: raw.category_id,
+    category_name: categoryNames.get(raw.category_id) ?? "Uncategorized",
+    included_items: includedItems,
+    created_at: raw.created_at,
+  };
+};
+
+/* =========================
+   COMBOS FETCHER
+========================= */
+
+export const fetchMenuCombos = async (
+  restaurantId: string
+): Promise<MenuCombo[]> => {
+  const [categoryResult, comboResult] = await Promise.all([
+    supabase
+      .from("menu_categories")
+      .select("id, name")
+      .eq("restaurant_id", restaurantId),
+
+    supabase
+      .from("menu_combos")
+      .select(`
         id,
         restaurant_id,
         name,
@@ -84,115 +222,65 @@ export const fetchMenuWithCategories = async (restaurantId: string) => {
         menu_combo_items (
           quantity,
           menu_items (
-            name
+            id,
+            name,
+            image_url
           )
         )
-      )
-    `)
-    .eq("restaurant_id", restaurantId);
+      `)
+      .eq("restaurant_id", restaurantId)
+      .eq("is_available", true)
+      .order("created_at", { ascending: false }),
+  ]);
 
-  if (error) {
-    console.error("Error fetching full menu:", error);
-    throw error;
+  if (categoryResult.error) {
+    console.error("Error fetching combo categories:", categoryResult.error);
+    throw categoryResult.error;
   }
 
-  // 1. Extract Categories
-  const categories: Category[] = data.map((c: any) => ({
-    id: c.id,
-    name: c.name,
-    restaurant_id: restaurantId,
+  if (comboResult.error) {
+    console.error("Error fetching combos and linked dishes:", comboResult.error);
+    throw comboResult.error;
+  }
+
+  const categoryNames = new Map<string, string>(
+    (categoryResult.data ?? []).map((category) => [
+      category.id,
+      category.name,
+    ])
+  );
+
+  return ((comboResult.data ?? []) as unknown as RawCombo[]).map((combo) =>
+    mapCombo(combo, categoryNames)
+  );
+};
+
+/* =========================
+   COMPLETE MENU FETCHER
+========================= */
+
+export const fetchMenuWithCategories = async (
+  restaurantId: string
+) => {
+  const [categories, items, combos] = await Promise.all([
+    fetchCategories(restaurantId),
+    fetchMenuItems(restaurantId),
+    fetchMenuCombos(restaurantId),
+  ]);
+
+  const categoryNames = new Map(
+    categories.map((category) => [category.id, category.name])
+  );
+
+  const itemsWithCategory: MenuItem[] = items.map((item) => ({
+    ...item,
+    category_name:
+      categoryNames.get(item.category_id) ?? "Uncategorized",
   }));
 
-  // 2. Extract and Flatten Items
-  const items: MenuItem[] = data.flatMap((c: any) =>
-    (c.menu_items || []).map((item: any) => ({
-      ...item,
-      category_name: c.name,
-    }))
-  );
-
-  // 3. Extract and Flatten Combos with Junction Table Data
-  const combos: MenuCombo[] = data.flatMap((c: any) =>
-    (c.menu_combos || []).map((combo: any) => ({
-      ...combo,
-      category_name: c.name,
-      // Transform the nested junction query into the ComboItem[] format
-      included_items: (combo.menu_combo_items || []).map((junction: any) => ({
-        name: junction.menu_items?.name || "Unknown Item",
-        quantity: junction.quantity || 1
-      }))
-    }))
-  );
-
-  return { categories, items, combos };
-};
-
-/* =========================
-   SPECIFIC FETCHERS
-========================= */
-
-export const fetchCategories = async (restaurantId: string) => {
-  const { data, error } = await supabase
-    .from("menu_categories")
-    .select("*")
-    .eq("restaurant_id", restaurantId);
-
-  if (error) throw error;
-  return data as Category[];
-};
-
-export const fetchMenuItems = async (restaurantId: string) => {
-  const { data, error } = await supabase
-    .from("menu_items")
-    .select("*")
-    .eq("restaurant_id", restaurantId)
-    .eq("is_available", true);
-
-  if (error) throw error;
-  return data as MenuItem[];
-};
-
-export const fetchMenuCombos = async (restaurantId: string) => {
-  // Updated to include junction join for the specific combo list view
-  const { data, error } = await supabase
-    .from("menu_combos")
-    .select(`
-      *,
-      menu_combo_items (
-        quantity,
-        menu_items ( name )
-      )
-    `)
-    .eq("restaurant_id", restaurantId)
-    .eq("is_available", true);
-
-  if (error) throw error;
-
-  return (data || []).map(combo => ({
-    ...combo,
-    included_items: (combo.menu_combo_items || []).map((j: any) => ({
-      name: j.menu_items?.name || "Unknown Item",
-      quantity: j.quantity || 1
-    }))
-  })) as MenuCombo[];
-};
-
-/* =========================
-   IMAGE HANDLER
-========================= */
-
-export const getMenuImageUrl = (path?: string | null) => {
-  if (!path || path.trim() === "") return "/placeholder.png";
-
-  if (path.startsWith("http")) return path;
-
-  try {
-    const { data } = supabase.storage
-      .from("menu-images")
-      .getPublicUrl(path);
-
-    return data?.publicUrl || "/placeholder.png";
-  } catch (err) {
-    return "/placeholder.png";
-  }
+  return {
+    categories,
+    items: itemsWithCategory,
+    combos,
+  };
 };

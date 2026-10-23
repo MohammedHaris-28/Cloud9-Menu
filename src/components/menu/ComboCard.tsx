@@ -1,151 +1,467 @@
-import { Plus, Check, Tag, Package, ChevronDown } from "lucide-react";
-import { getMenuImageUrl, type MenuCombo } from "@/data/menuData";
-import { useState } from "react";
 
-// Define the structure for items inside the combo
+import { useState } from "react";
+import type { MouseEvent } from "react";
+import {
+  Plus,
+  Check,
+  Tag,
+  Package,
+  ChevronDown,
+  Utensils,
+  AlertCircle,
+} from "lucide-react";
+
+import {
+  getMenuImageUrl,
+  type MenuCombo,
+} from "@/data/menuData";
+
+// ============================================
+// TYPES
+// ============================================
+
 export interface ComboItem {
+  id?: string;
   name: string;
   quantity: number;
+  image_url?: string | null;
 }
 
-// The complete interface for the Combo
-export interface ComboWithItems extends MenuCombo {
+interface RawComboMenuItem {
+  id?: string;
+  name?: string | null;
+  image_url?: string | null;
+}
+
+interface RawComboItem {
+  quantity?: number | null;
+  menu_items?: RawComboMenuItem | RawComboMenuItem[] | null;
+  menu_item?: RawComboMenuItem | null;
+}
+
+type ComboBase = Omit<MenuCombo, "included_items">;
+
+export interface ComboWithItems extends ComboBase {
   included_items: ComboItem[];
+
+  // Raw Supabase relation, accepted while normalizing fetched data.
+  menu_combo_items?: RawComboItem[] | null;
 }
 
 interface ComboCardProps {
   item: ComboWithItems;
-  onAdd: (item: any) => void;
+  onAdd: (item: ComboWithItems) => void;
   view: "grid" | "list";
 }
+
+// ============================================
+// HELPERS
+// ============================================
+
+const formatPrice = (
+  price: number | string | null | undefined
+): number => {
+  const value = Number(price ?? 0);
+  return Number.isFinite(value) ? value : 0;
+};
+
+const normalizeComboItems = (item: ComboWithItems): ComboItem[] => {
+  const directItems = Array.isArray(item.included_items)
+    ? item.included_items
+    : [];
+
+  // Use already-normalized items when they contain dish names.
+  const normalizedDirectItems = directItems.filter(
+    (dish) =>
+      dish &&
+      typeof dish.name === "string" &&
+      dish.name.trim().length > 0
+  );
+
+  if (normalizedDirectItems.length > 0) {
+    return normalizedDirectItems;
+  }
+
+  // Otherwise, try the raw Supabase relationship.
+  const rawItems = item.menu_combo_items ?? [];
+
+  return rawItems.flatMap((entry) => {
+    const relation = entry.menu_items ?? entry.menu_item ?? null;
+
+    const dish = Array.isArray(relation) ? relation[0] : relation;
+
+    if (!dish?.name?.trim()) {
+      return [];
+    }
+
+    return [
+      {
+        id: dish.id,
+        name: dish.name.trim(),
+        image_url: dish.image_url ?? null,
+        quantity: Math.max(1, Number(entry.quantity) || 1),
+      },
+    ];
+  });
+};
+
+// ============================================
+// COMBO CARD
+// ============================================
 
 const ComboCard = ({ item, onAdd, view }: ComboCardProps) => {
   const [justAdded, setJustAdded] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const imageUrl = getMenuImageUrl(item.image_url);
-  const displayPrice = item.discount_price;
-  const originalPrice = item.total_price;
-  const savingAmount = originalPrice - displayPrice;
+  const includedItems = normalizeComboItems(item);
 
-  const handleAdd = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!item.is_available) return;
-    onAdd(item);
+  const displayPrice = formatPrice(item.discount_price);
+  const originalPrice = formatPrice(item.total_price);
+  const savingAmount = Math.max(0, originalPrice - displayPrice);
+
+  const imageUrl = getMenuImageUrl(item.image_url);
+  const isAvailable = item.is_available !== false;
+
+  const handleAdd = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+
+    if (!isAvailable || justAdded) return;
+
+    onAdd({
+      ...item,
+      included_items: includedItems,
+    });
+
     setJustAdded(true);
-    setTimeout(() => setJustAdded(false), 800);
+
+    window.setTimeout(() => {
+      setJustAdded(false);
+    }, 1000);
   };
 
+  // ============================================
+  // BADGE
+  // ============================================
+
   const ComboBadge = () => (
-    <div className="flex items-center gap-1.5 bg-zinc-900 text-white text-[10px] font-black px-3 py-1.5 rounded-full shadow-sm uppercase tracking-wider">
-      <Package className="w-3.5 h-3.5 text-orange-400" />
-      Bundle Offer
+    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-zinc-950/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-white shadow-lg backdrop-blur-md">
+      <Package className="h-3.5 w-3.5 text-orange-400" />
+      Combo Offer
     </div>
   );
 
-  const ComboItemsList = ({ items }: { items: ComboItem[] }) => {
-    if (!items || items.length === 0) return null;
+  // ============================================
+  // DISH LIST
+  // ============================================
 
-    const maxVisible = isExpanded || view === "list" ? items.length : 3;
-    const visibleItems = items.slice(0, maxVisible);
-    const remainingCount = items.length - visibleItems.length;
+  const DishList = ({ compact = false }: { compact?: boolean }) => {
+    if (includedItems.length === 0) {
+      return (
+        <div className="my-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
 
-    return (
-      <div className="space-y-2 mt-4 mb-3 border-t border-zinc-100 pt-4">
-        {visibleItems.map((ci, idx) => (
-          <div key={idx} className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-900/50 p-2.5 rounded-xl border border-zinc-100 dark:border-zinc-800">
-            <div className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-              <Check className="w-4 h-4" />
-            </div>
-            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 capitalize">
-              {ci.name}
-              {ci.quantity > 1 && <span className="text-zinc-400 font-medium ml-1.5">x{ci.quantity}</span>}
+          <div>
+            <p className="text-xs font-bold">
+              Dish details unavailable
+            </p>
+
+            <p className="mt-1 text-xs leading-relaxed">
+              No dish names were returned for this combo. Check the
+              combo-to-menu-item relationship in Supabase.
             </p>
           </div>
+        </div>
+      );
+    }
+
+    const visibleItems =
+      compact && !isExpanded
+        ? includedItems.slice(0, 3)
+        : includedItems;
+
+    const remainingCount =
+      includedItems.length - visibleItems.length;
+
+    return (
+      <div className="mt-3 space-y-2">
+        {visibleItems.map((dish, index) => (
+          <div
+            key={`${dish.id ?? dish.name}-${index}`}
+            className="flex min-w-0 items-center gap-3 rounded-xl border border-zinc-100 bg-zinc-50 p-2.5 transition-colors hover:border-orange-100 hover:bg-orange-50/40"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+              <Check className="h-4 w-4" />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="break-words text-sm font-semibold capitalize leading-snug text-zinc-800">
+                {dish.name}
+              </p>
+            </div>
+
+            <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-zinc-600 ring-1 ring-zinc-200">
+              ×{Math.max(1, Number(dish.quantity) || 1)}
+            </span>
+          </div>
         ))}
+
         {remainingCount > 0 && (
-          <p className="text-xs text-zinc-400 font-semibold pl-12">
-            + {remainingCount} more item{remainingCount > 1 ? 's' : ''}...
-          </p>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="w-full rounded-lg px-2 py-2 text-left text-xs font-bold text-orange-600 transition-colors hover:bg-orange-50"
+          >
+            + {remainingCount} more dish
+            {remainingCount > 1 ? "es" : ""} — Show all
+          </button>
         )}
+
+        {compact &&
+          isExpanded &&
+          includedItems.length > 3 && (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(false)}
+              className="w-full rounded-lg px-2 py-2 text-left text-xs font-bold text-zinc-500 hover:bg-zinc-100"
+            >
+              Show less
+            </button>
+          )}
       </div>
     );
   };
 
-  // ================= LIST VIEW =================
+  // ============================================
+  // PRICE
+  // ============================================
+
+  const PriceBlock = ({ large = false }: { large?: boolean }) => (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span
+        className={`font-black tracking-tight text-zinc-950 ${
+          large ? "text-2xl" : "text-xl"
+        }`}
+      >
+        ₹{displayPrice.toFixed(0)}
+      </span>
+
+      {originalPrice > displayPrice && (
+        <span className="text-sm font-semibold text-zinc-400 line-through">
+          ₹{originalPrice.toFixed(0)}
+        </span>
+      )}
+    </div>
+  );
+
+  // ============================================
+  // LIST VIEW
+  // ============================================
+
   if (view === "list") {
     return (
-      <div className={`group relative flex gap-4 p-4 bg-white rounded-[1.5rem] border border-zinc-100 transition-all duration-300 hover:shadow-xl hover:shadow-zinc-200/50 ${!item.is_available ? "opacity-60 grayscale-[0.5]" : ""}`}>
-        <div className="relative shrink-0">
-          <img src={imageUrl} alt={item.name} className="w-28 h-28 rounded-2xl object-cover shadow-md transition-transform duration-500 group-hover:scale-105" />
-          <div className="absolute top-2 left-2"><ComboBadge /></div>
-        </div>
+      <article
+        className={`group relative overflow-hidden rounded-3xl border border-zinc-200/80 bg-white p-3 shadow-sm transition-all duration-300 hover:border-orange-200 hover:shadow-lg sm:p-4 ${
+          !isAvailable ? "opacity-70" : ""
+        }`}
+      >
+        <div className="flex items-start gap-3 sm:gap-5">
+          <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl bg-zinc-100 sm:h-36 sm:w-36">
+            <img
+              src={imageUrl}
+              alt={item.name}
+              loading="lazy"
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
 
-        <div className="flex-1 flex flex-col py-1">
-          <h3 className="font-extrabold text-zinc-900 text-base leading-tight capitalize mb-1">{item.name}</h3>
-          <p className="text-xs text-zinc-500 line-clamp-1 font-medium italic mb-2">{item.description}</p>
-          
-          <div className="flex items-center justify-between mt-auto">
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="font-black text-2xl text-zinc-900">₹{displayPrice.toFixed(0)}</span>
-                <span className="text-sm text-zinc-400 line-through font-bold">₹{originalPrice.toFixed(0)}</span>
-              </div>
+            <div className="absolute left-1.5 top-1.5">
+              <ComboBadge />
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h3 className="break-words text-base font-extrabold capitalize leading-tight text-zinc-950 sm:text-lg">
+              {item.name}
+            </h3>
+
+            {item.description && (
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-500 sm:text-sm">
+                {item.description}
+              </p>
+            )}
+
+            <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-zinc-500">
+              <Utensils className="h-3.5 w-3.5" />
+
+              {includedItems.length} included dish
+              {includedItems.length === 1 ? "" : "es"}
             </div>
 
-            <div className="flex items-center gap-3">
-               {savingAmount > 0 && (
-                  <div className="bg-emerald-500 text-white text-[10px] font-black px-3 py-1.5 rounded-full">Save ₹{savingAmount}</div>
-               )}
-               <button onClick={handleAdd} className={`p-2.5 rounded-xl transition-all ${justAdded ? "bg-green-600 text-white" : "bg-zinc-900 text-white"}`}>
-                  {justAdded ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-               </button>
+            <DishList compact />
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-3">
+              <div>
+                <PriceBlock />
+
+                {savingAmount > 0 && (
+                  <span className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                    <Tag className="h-3 w-3" />
+                    Save ₹{savingAmount.toFixed(0)}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAdd}
+                disabled={!isAvailable}
+                aria-label={`Add ${item.name} to cart`}
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all duration-200 disabled:cursor-not-allowed disabled:bg-zinc-300 ${
+                  justAdded
+                    ? "bg-emerald-600 text-white"
+                    : "bg-zinc-950 text-white hover:bg-orange-600 active:scale-95"
+                }`}
+              >
+                {justAdded ? (
+                  <Check className="h-5 w-5" />
+                ) : (
+                  <Plus className="h-5 w-5" />
+                )}
+              </button>
             </div>
           </div>
         </div>
-      </div>
+
+        {!isAvailable && (
+          <div className="mt-3 rounded-xl bg-zinc-100 px-3 py-2 text-center text-xs font-bold text-zinc-500">
+            Currently unavailable
+          </div>
+        )}
+      </article>
     );
   }
 
-  // ================= GRID VIEW =================
+  // ============================================
+  // GRID VIEW
+  // ============================================
+
   return (
-    <div className={`group relative bg-white rounded-[2rem] border border-zinc-100 overflow-hidden transition-all duration-500 hover:shadow-2xl ${!item.is_available ? "opacity-80" : ""}`}>
-      <div className="relative aspect-square overflow-hidden">
-        <img src={imageUrl} alt={item.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-        <div className="absolute top-4 left-4"><ComboBadge /></div>
-      </div>
+    <article
+      className={`group relative flex h-full flex-col overflow-hidden rounded-[1.75rem] border border-zinc-200/80 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-xl ${
+        !isAvailable ? "opacity-70" : ""
+      }`}
+    >
+      <div className="relative aspect-[4/3] overflow-hidden bg-zinc-100">
+        <img
+          src={imageUrl}
+          alt={item.name}
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+        />
 
-      <div className="p-5">
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="font-extrabold text-zinc-900 text-lg leading-tight capitalize">{item.name}</h3>
-          {item.included_items.length > 3 && (
-             <button onClick={() => setIsExpanded(!isExpanded)} className={`text-zinc-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
-                <ChevronDown className="w-5 h-5" />
-             </button>
-          )}
+        <div className="absolute left-3 top-3">
+          <ComboBadge />
         </div>
-        <p className="text-[11px] text-zinc-400 line-clamp-1 mb-4 italic">{item.description}</p>
 
-        <ComboItemsList items={item.included_items} />
-
-        <div className="flex items-center justify-between border-t border-zinc-100 pt-5 mt-4">
-          <div className="flex flex-col">
-            <div className="flex items-baseline gap-2">
-              <span className="font-black text-zinc-900 text-2xl">₹{displayPrice.toFixed(0)}</span>
-              <span className="text-xs text-zinc-400 line-through font-bold">₹{originalPrice.toFixed(0)}</span>
-            </div>
-          </div>
-          <button onClick={handleAdd} className={`flex items-center justify-center rounded-full transition-all ${justAdded ? "bg-green-600 text-white w-20 h-10 rounded-2xl" : "bg-zinc-900 text-white w-10 h-10"}`}>
-            {justAdded ? <span className="text-[10px] font-black">DONE</span> : <Plus className="w-6 h-6" />}
-          </button>
-        </div>
         {savingAmount > 0 && (
-          <div className="mt-3 bg-emerald-500 text-white text-[10px] font-black py-1 px-3 rounded-full inline-flex items-center gap-1">
-            <Tag className="w-3 h-3" /> SAVE ₹{savingAmount}
+          <div className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white shadow-lg">
+            <Tag className="h-3 w-3" />
+            SAVE ₹{savingAmount.toFixed(0)}
+          </div>
+        )}
+
+        {!isAvailable && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+            <span className="rounded-full bg-white px-4 py-2 text-xs font-black text-zinc-900">
+              Currently unavailable
+            </span>
           </div>
         )}
       </div>
-    </div>
+
+      <div className="flex flex-1 flex-col p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="min-w-0 break-words text-lg font-extrabold capitalize leading-snug text-zinc-950">
+            {item.name}
+          </h3>
+
+          {includedItems.length > 3 && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsExpanded((previous) => !previous)
+              }
+              aria-label={
+                isExpanded
+                  ? "Collapse included dishes"
+                  : "Expand included dishes"
+              }
+              aria-expanded={isExpanded}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600 ${
+                isExpanded ? "rotate-180" : ""
+              }`}
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {item.description && (
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-500">
+            {item.description}
+          </p>
+        )}
+
+        <div className="mt-3 flex items-center gap-2 text-xs font-bold text-zinc-500">
+          <Utensils className="h-4 w-4 text-orange-500" />
+          What's included
+
+          <span className="rounded-full bg-orange-50 px-2 py-0.5 text-orange-700">
+            {includedItems.length} dish
+            {includedItems.length === 1 ? "" : "es"}
+          </span>
+        </div>
+
+        <DishList compact />
+
+        <div className="mt-auto border-t border-zinc-100 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <PriceBlock large />
+
+              {savingAmount > 0 && (
+                <p className="mt-1 text-[11px] font-semibold text-emerald-700">
+                  You save ₹{savingAmount.toFixed(0)}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={!isAvailable}
+              aria-label={`Add ${item.name} to cart`}
+              className={`flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-4 font-bold transition-all duration-200 disabled:cursor-not-allowed disabled:bg-zinc-300 ${
+                justAdded
+                  ? "bg-emerald-600 text-white"
+                  : "bg-zinc-950 text-white hover:bg-orange-600 active:scale-95"
+              }`}
+            >
+              {justAdded ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  <span className="text-xs">Added</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" />
+                  <span className="text-xs">Add combo</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
   );
 };
 
